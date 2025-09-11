@@ -1,0 +1,141 @@
+[ {
+  "version" : {
+    "instance" : "1.0.0",
+    "model" : ""
+  },
+  "properties" : {
+    "humidity" : {
+      "type" : "number",
+      "forms" : [ {
+        "href" : "http://localhost:8080/tSensor/properties/humidity",
+        "contentType" : "application/json",
+        "op" : [ "readproperty" ],
+        "optionalProperties" : {
+          "htv:methodName" : "GET"
+        }
+      }, {
+        "href" : "mqtt://localhost:61890/tSensor/properties/humidity",
+        "contentType" : "application/json",
+        "op" : [ "readproperty" ]
+      } ],
+      "title" : "humidity",
+      "const" : 50.0,
+      "readOnly" : true
+    },
+    "temperature" : {
+      "type" : "number",
+      "forms" : [ {
+        "href" : "http://localhost:8080/tSensor/properties/temperature",
+        "contentType" : "application/json",
+        "op" : [ "readproperty" ],
+        "optionalProperties" : {
+          "htv:methodName" : "GET"
+        }
+      }, {
+        "href" : "http://localhost:8080/tSensor/properties/temperature/observable",
+        "contentType" : "application/json",
+        "subprotocol" : "longpoll",
+        "op" : [ "observeproperty", "unobserveproperty" ]
+      }, {
+        "href" : "mqtt://localhost:61890/tSensor/properties/temperature",
+        "contentType" : "application/json",
+        "op" : [ "readproperty" ]
+      }, {
+        "href" : "mqtt://localhost:61890/tSensor/properties/temperature/observable",
+        "contentType" : "application/json",
+        "op" : [ "observeproperty", "unobserveproperty" ]
+      } ],
+      "observable" : true,
+      "title" : "temperature",
+      "readOnly" : true
+    },
+    "unit" : {
+      "type" : "string",
+      "forms" : [ {
+        "href" : "http://localhost:8080/tSensor/properties/unit",
+        "contentType" : "application/json",
+        "op" : [ "readproperty" ],
+        "optionalProperties" : {
+          "htv:methodName" : "GET"
+        }
+      }, {
+        "href" : "mqtt://localhost:61890/tSensor/properties/unit",
+        "contentType" : "application/json",
+        "op" : [ "readproperty" ]
+      } ],
+      "title" : "unit",
+      "const" : "C",
+      "readOnly" : true
+    }
+  },
+  "actions" : {
+    "reset" : {
+      "forms" : [ {
+        "href" : "http://localhost:8080/tSensor/actions/reset",
+        "contentType" : "application/json",
+        "op" : [ "invokeaction" ]
+      }, {
+        "href" : "mqtt://localhost:61890/tSensor/actions/reset",
+        "contentType" : "application/json",
+        "op" : [ "invokeaction" ]
+      } ],
+      "input" : {
+        "type" : "null"
+      },
+      "output" : {
+        "type" : "string"
+      },
+      "synchronous" : true
+    },
+    "setTemperature" : {
+      "forms" : [ {
+        "href" : "http://localhost:8080/tSensor/actions/setTemperature",
+        "contentType" : "application/json",
+        "op" : [ "invokeaction" ]
+      }, {
+        "href" : "mqtt://localhost:61890/tSensor/actions/setTemperature",
+        "contentType" : "application/json",
+        "op" : [ "invokeaction" ]
+      } ],
+      "input" : {
+        "type" : "number"
+      },
+      "output" : {
+        "type" : "string"
+      },
+      "synchronous" : true
+    }
+  },
+  "id" : "tSensor",
+  "forms" : [ {
+    "href" : "http://localhost:8080/tSensor/all/properties",
+    "contentType" : "application/json",
+    "op" : [ "readallproperties", "readmultipleproperties" ]
+  } ],
+  "events" : {
+    "overheatEvent" : {
+      "title" : "overheat",
+      "data" : {
+        "type" : "string"
+      },
+      "forms" : [ {
+        "href" : "http://localhost:8080/tSensor/events/overheatEvent",
+        "contentType" : "application/json",
+        "subprotocol" : "longpoll",
+        "op" : [ "subscribeevent" ]
+      }, {
+        "href" : "mqtt://localhost:61890/tSensor/events/overheatEvent",
+        "contentType" : "application/json",
+        "op" : [ "subscribeevent", "unsubscribeevent" ],
+        "optionalProperties" : {
+          "mqtt:qos" : 0,
+          "mqtt:retain" : false
+        }
+      } ]
+    }
+  },
+  "title" : "Temperature Sensor",
+  "description" : "A thing with properties, actions, and events.",
+  "@type" : "Thing",
+  "@context" : "https://www.w3.org/2022/wot/td/v1.1"
+} ]
