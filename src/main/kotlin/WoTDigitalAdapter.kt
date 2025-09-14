@@ -6,6 +6,7 @@ import it.wldt.adapter.physical.PhysicalAssetDescription
 import it.wldt.adapter.physical.PhysicalAssetEvent
 import it.wldt.adapter.physical.PhysicalAssetProperty
 import it.wldt.core.state.DigitalTwinState
+import it.wldt.core.state.DigitalTwinStateAction
 import it.wldt.core.state.DigitalTwinStateChange
 import it.wldt.core.state.DigitalTwinStateEvent
 import it.wldt.core.state.DigitalTwinStateEventNotification
@@ -23,7 +24,10 @@ import org.eclipse.thingweb.reflection.annotations.Property
 import org.eclipse.thingweb.thing.ExposedThing
 import org.eclipse.thingweb.thing.ThingDescription
 import org.eclipse.thingweb.thing.schema.InteractionInput
+import org.eclipse.thingweb.thing.schema.NullSchema
 import org.eclipse.thingweb.thing.schema.PropertyAffordance
+import org.eclipse.thingweb.thing.schema.StringSchema
+import org.eclipse.thingweb.thing.schema.Type
 import org.eclipse.thingweb.thing.schema.WoTExposedThing
 import org.eclipse.thingweb.thing.schema.WoTThingDescription
 import org.eclipse.thingweb.thing.schema.toInteractionInputValue
@@ -34,18 +38,17 @@ import java.util.stream.Collectors
 import kotlin.jvm.optionals.toList
 import kotlin.sequences.toList
 
-/*
-
-come ottenere il Servient? (adapter cofigurable?)
-L'adapter crea automaticamente la Thing description e ha un metodo per esporla?
-L'adapter espone una Thing corrispondente al DT?
-Aggiornamento della Thing esposta
-Gestionde del sync/unsync: aggiunta di property "last update" alla Thing?
+/**
+ * A Digital Adapter implementation based on the Eclipse ThingWeb (Kotlin WoT) library.
+ * This adapter exposes a WoT Thing Description and manages the interaction with the underlying
+ * Digital Twin through the WLDT framework.
+ *
+ * @param id The unique identifier for this Digital Adapter instance.
+ * @param configuration The configuration object containing settings for the adapter, including the Servient instance.
  */
-
 class WoTDigitalAdapter(id: String?, private val configuration: WoTDigitalAdapterConfiguration) : DigitalAdapter<String>(id) {
 
-    private val servient = configuration.getServient()
+    private val servient = configuration.servient
     private val wot = Wot.create(servient)
     private lateinit var td: WoTThingDescription
     private lateinit var exposedThing: WoTExposedThing
@@ -53,6 +56,8 @@ class WoTDigitalAdapter(id: String?, private val configuration: WoTDigitalAdapte
     private val logger = LoggerFactory.getLogger(WoTDigitalAdapter::class.java)
 
     private val propertiesValues = mutableMapOf<String, InteractionInput>()
+    private val propertiesObserved = mutableSetOf<String>()
+    private val eventSubscribed = mutableSetOf<String>()
 
     /**
      * Callback to notify the adapter on its correct startup
@@ -79,6 +84,7 @@ class WoTDigitalAdapter(id: String?, private val configuration: WoTDigitalAdapte
      * Callback to notify the adapter that has been stopped
      */
     override fun onAdapterStop() {
+        coroutineScope.cancel()
         logger.info("WoT Digital Adapter $id stopped")
     }
 
@@ -122,17 +128,12 @@ class WoTDigitalAdapter(id: String?, private val configuration: WoTDigitalAdapte
     /**
      * DT Life Cycle Notification that the DT has correctly Started
      */
-    override fun onDigitalTwinStart() {
-        logger.info("DT started")
-    }
+    override fun onDigitalTwinStart() {}
 
     /**
      * DT Life Cycle Notification that the DT has been stopped
      */
-    override fun onDigitalTwinStop() {
-        coroutineScope.cancel()
-        logger.info("DT stopped")
-    }
+    override fun onDigitalTwinStop() {}
 
     /**
      * DT Life Cycle Notification that the DT has destroyed
@@ -154,48 +155,42 @@ class WoTDigitalAdapter(id: String?, private val configuration: WoTDigitalAdapte
         previousDigitalTwinState: DigitalTwinState?,
         digitalTwinStateChangeList: ArrayList<DigitalTwinStateChange>?
     ) {
-        // We can also check each DT's state change potentially differentiating the behaviour for each change
         if (digitalTwinStateChangeList != null && !digitalTwinStateChangeList.isEmpty()) {
-            // Iterate through each state change in the list
 
             for (stateChange in digitalTwinStateChangeList) {
-                // Get information from the state change
-
                 val operation = stateChange.operation
                 val resourceType = stateChange.resourceType
                 val resource = stateChange.resource
 
-
-                // Perform different actions based on the type of operation
                 when (operation) {
-                    DigitalTwinStateChange.Operation.OPERATION_UPDATE ->                     // Handle an update operation
+                    DigitalTwinStateChange.Operation.OPERATION_UPDATE ->
                         if (resourceType == DigitalTwinStateChange.ResourceType.PROPERTY) {
                             val p = resource as DigitalTwinStateProperty<*>
                             val interactionInput = getInteractionInput(p.value)
                             propertiesValues[p.key] = interactionInput
-                            coroutineScope.launch {
-                                exposedThing.emitPropertyChange(p.key, interactionInput)
+                            if (propertiesObserved.contains(p.key)) {
+                                coroutineScope.launch {
+                                    exposedThing.emitPropertyChange(p.key, interactionInput)
+                                }
                             }
-                        } else {
-                            logger.info("Update operation on $resourceType: $resource not handled")
                         }
 
-                    DigitalTwinStateChange.Operation.OPERATION_UPDATE_VALUE ->                     // Handle an update value operation
-                        println("Update value operation on $resourceType: $resource")
+                    DigitalTwinStateChange.Operation.OPERATION_UPDATE_VALUE ->
+                        logger.info("Update value operation on $resourceType: $resource")
 
-                    DigitalTwinStateChange.Operation.OPERATION_ADD ->                     // Handle an add operation
-                        println("Add operation on $resourceType: $resource")
+                    DigitalTwinStateChange.Operation.OPERATION_ADD ->
+                        logger.info("Add operation on $resourceType: $resource")
 
-                    DigitalTwinStateChange.Operation.OPERATION_REMOVE ->                     // Handle a remove operation
-                        println("Remove operation on $resourceType: $resource")
+                    DigitalTwinStateChange.Operation.OPERATION_REMOVE ->
+                        logger.info("Remove operation on $resourceType: $resource")
 
-                    else ->                     // Handle unknown operation (optional)
-                        println("Unknown operation on $resourceType: $resource")
+                    else ->
+                        logger.info("Unknown operation on $resourceType: $resource")
                 }
             }
         } else {
             // No state changes
-            println("No state changes detected.")
+            logger.info("No state changes detected.")
         }
     }
 
@@ -205,7 +200,23 @@ class WoTDigitalAdapter(id: String?, private val configuration: WoTDigitalAdapte
      *
      * @param digitalTwinStateEventNotification The generated Notification associated to a DT Event
      */
-    override fun onEventNotificationReceived(digitalTwinStateEventNotification: DigitalTwinStateEventNotification<*>?) {}
+    override fun onEventNotificationReceived(digitalTwinStateEventNotification: DigitalTwinStateEventNotification<*>?) {
+        logger.info("RECEIVED event notification: $digitalTwinStateEventNotification")
+        if (digitalTwinStateEventNotification != null) {
+            val eventKey = digitalTwinStateEventNotification.digitalEventKey
+            val eventValue = digitalTwinStateEventNotification.body
+            if (eventSubscribed.contains(eventKey)) {
+                coroutineScope.launch {
+                    try {
+                        logger.info("Emitted event $eventKey with value $eventValue")
+                        exposedThing.emitEvent(eventKey, getInteractionInput(eventValue))
+                    } catch (e: Exception) {
+                        logger.error("Error emitting event $eventKey with value $eventValue: ${e.message}", e)
+                    }
+                }
+            }
+        }
+    }
 
 
 
@@ -218,22 +229,26 @@ class WoTDigitalAdapter(id: String?, private val configuration: WoTDigitalAdapte
         adaptersPhysicalAssetDescriptionMap?.forEach { (_, pad) ->
             pad?.properties?.forEach { p -> properties.putIfAbsent(p.key, mapOf(
                 "type" to mapToType(p.type),
-                "observable" to false,
-                "readOnly" to !p.isWritable
-            )) }
-            //"output", "descriptions", "title", "idempotent", "@type", "uriVariables", "description", "safe", "forms", "synchronous", "input", "titles"
+                "observable" to (configuration.allPropertiesObservable || configuration.observableProperties.contains(p.key) && !p.isImmutable),
+                "const" to if (p.isImmutable) p.initialValue else null,
+                "readOnly" to !p.isWritable,
+                "default" to p.initialValue
+                ))
+                propertiesValues[p.key] = getInteractionInput(p.initialValue)
+            }
             pad?.actions?.forEach { a -> actions.putIfAbsent(a.key, mapOf(
-                "@type" to a.type
+                "@type" to a.type,
+                "input" to mapOf("type" to a.contentType),
             )) }
             pad?.events?.forEach { e -> events.putIfAbsent(e.key, mapOf(
-                "@type" to e.type
+                "@type" to e.type,
             )) }
         }
 
-        td = createThingDescription(configuration.getTDinfo(), properties, actions, events)
-        exposedThing = createExposedThing(td)
+        val constructionTD = createThingDescription(configuration.tdInfo, properties, actions, events)
+        exposedThing = createExposedThing(constructionTD)
+        td = exposedThing.getThingDescription()
     }
-
 
     private fun createThingDescription(
         base: Map<String, String>,
@@ -252,8 +267,33 @@ class WoTDigitalAdapter(id: String?, private val configuration: WoTDigitalAdapte
 
     private fun createExposedThing(td: WoTThingDescription): WoTExposedThing {
         val exposedThing = wot.produce(td)
-        td.properties.keys.forEach { pKey ->
+        td.properties.forEach { (pKey, pAff) ->
             exposedThing.setPropertyReadHandler(pKey) { _ -> propertiesValues[pKey] }
+            if (!pAff.readOnly) exposedThing.setPropertyWriteHandler(pKey) { input, _ ->
+                logger.info("Property $pKey write invoked with input: ${input.value()}")
+                getInteractionInput(input.value())
+            }
+            if (pAff.observable) {
+                exposedThing.setPropertyObserveHandler(pKey) { _ ->
+                    logger.info("Property $pKey observe invoked")
+                    propertiesObserved.add(pKey)
+                    propertiesValues[pKey]
+                }
+            }
+        }
+        td.actions.keys.forEach { aKey ->
+            exposedThing.setActionHandler(aKey) { input, _ ->
+                logger.info("Action $aKey invoked with input: ${input.value()}, type: ${input.value().nodeType}")
+                publishDigitalActionWldtEvent(aKey, jsonNodeToValue(input.value()))
+                getInteractionInput(input.value())
+            }
+        }
+        td.events.forEach { (eKey, eAff) ->
+            exposedThing.setEventSubscribeHandler(eKey) { _ ->
+                logger.info("Event $eKey subscription invoked")
+                eventSubscribed.add(eKey)
+                observeDigitalTwinEventNotification(eKey)
+            }
         }
         return exposedThing
     }
@@ -293,24 +333,12 @@ class WoTDigitalAdapter(id: String?, private val configuration: WoTDigitalAdapte
         return "object"
     }
 
-    private fun jsonNodeToKotlin(node: JsonNode): Any? = when {
-        node.isNumber -> node.numberValue() // Integer, Long, BigInteger, Double, Float, BigDecimal
-        node.isTextual -> node.textValue()
-        node.isBoolean -> node.booleanValue()
-        node.isArray -> node.elements().asSequence().map { jsonNodeToKotlin(it) }.toList()
-        node.isObject -> node.fields().asSequence().associate { it.key to jsonNodeToKotlin(it.value) }
-        node.isNull || node is NullNode -> null
-        else -> node.toString() // fallback as string if unknown
-    }
-
     private fun getInteractionInput(body: Any?): InteractionInput.Value {
         if (body is JsonNode) {
-            val converted = jsonNodeToKotlin(body)
-            require(converted != null) { "Unsupported null JsonNode for InteractionInput" }
-            return getInteractionInput(converted)
+            return InteractionInput.Value(body)
         }
         return when (body) {
-            null -> throw IllegalArgumentException("Null value not supported for InteractionInput")
+            null -> throw IllegalArgumentException("Null value cannot be converted to InteractionInput")
             is Number -> body.toInteractionInputValue()
             is String -> body.toInteractionInputValue()
             is Boolean -> body.toInteractionInputValue()
@@ -319,6 +347,28 @@ class WoTDigitalAdapter(id: String?, private val configuration: WoTDigitalAdapte
             else -> throw IllegalArgumentException(
                 "Unsupported type: ${body::class.qualifiedName}. Only JsonNode, Number, String, Boolean, Map, List are supported."
             )
+        }
+    }
+
+    private fun jsonNodeToValue(node: JsonNode?): Any? {
+        return when {
+            node == null || node is NullNode -> null
+            node.isTextual -> node.asText()
+            node.isBoolean -> node.asBoolean()
+            node.isInt -> node.asInt()
+            node.isLong -> node.asLong()
+            node.isFloat || node.isDouble -> node.asDouble()
+            node.isArray -> {
+                val list = mutableListOf<Any?>()
+                node.forEach { list.add(jsonNodeToValue(it)) }
+                list
+            }
+            node.isObject -> {
+                val map = mutableMapOf<String, Any?>()
+                node.fields().forEach { (key, value) -> map[key] = jsonNodeToValue(value) }
+                map
+            }
+            else -> throw IllegalArgumentException("Unsupported JsonNode type: ${node.nodeType}")
         }
     }
 }

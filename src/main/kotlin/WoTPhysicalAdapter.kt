@@ -47,16 +47,18 @@ class WoTPhysicalAdapter(id: String?, configuration: WoTPhysicalAdapterConfigura
     override fun onAdapterStart() {
         logger.info("WoTPhysicalAdapter $id starting...")
         try {
-            td = adapterConfig.getThingDescription()
+            td = configuration.getThingDescription()
             val pad = PhysicalAssetDescription().apply {
                 td.properties.forEach { (name, propertyAffordance) ->
                     properties.add(getPhysicalAssetProperty(name, propertyAffordance))
                 }
-                td.events.forEach { (name, _) ->
-                    events.add(PhysicalAssetEvent(name, "application/json"))
+                td.events.forEach { (name, eventAffordance) ->
+                    events.add(PhysicalAssetEvent(name, eventAffordance.objectType?.defaultType))
                 }
-                td.actions.forEach { (name, _) ->
-                    actions.add(PhysicalAssetAction(name, "$name.default.action", "application/json"))
+                td.actions.forEach { (name, actionAffordance) ->
+                    val input = actionAffordance.input
+                    val inputType = input?.objectType?.defaultType ?: getDeafultType(input)
+                    actions.add(PhysicalAssetAction(name, actionAffordance.objectType?.defaultType, inputType) )
                 }
             }
             this@WoTPhysicalAdapter.notifyPhysicalAdapterBound(pad)
@@ -88,8 +90,8 @@ class WoTPhysicalAdapter(id: String?, configuration: WoTPhysicalAdapterConfigura
         pollingActives.forEach { (name, _) -> pollingActives[name] = false }
         coroutineScope.launch {
             launch {
-                eventSubscriptions.forEach { (_, sub) -> launch { sub.stop(InteractionOptions()) } }
-                propertySubscriptions.forEach { (_, sub) -> launch { sub.stop(InteractionOptions()) } }
+                eventSubscriptions.forEach { (name, sub) -> launch { sub.stop(InteractionOptions()) } }
+                propertySubscriptions.forEach { (name, sub) -> launch { sub.stop(InteractionOptions()) } }
             }.join()
             startedClients.values.forEach { client -> launch { client?.stop() } }
         }
@@ -121,7 +123,7 @@ class WoTPhysicalAdapter(id: String?, configuration: WoTPhysicalAdapterConfigura
 
                 coroutineScope.launch {
                     try {
-                        val output = if (actionAffordance.input !is NullSchema) {
+                        if (actionAffordance.input !is NullSchema) {
                             if (actionBody != null) {
                                 consumedThing.invokeAction(actionKey, getInteractionInput(actionBody))
                             } else {
@@ -129,9 +131,9 @@ class WoTPhysicalAdapter(id: String?, configuration: WoTPhysicalAdapterConfigura
                                 return@launch
                             }
                         } else {
-                            consumedThing.invokeAction(actionKey, getInteractionInput("")) // to handle actions without placeholder
+                            consumedThing.invokeAction(actionKey) // to handle actions without placeholder
                         }
-                        logger.info("Action '$actionKey' invoked successfully. Output: ${output.value()}")
+                        logger.info("Action '$actionKey' invoked successfully.")
                     } catch (e: Exception) {
                         logger.error("Error invoking action '$actionKey' on consumed thing: ${e.message}", e)
                     }
@@ -150,13 +152,34 @@ class WoTPhysicalAdapter(id: String?, configuration: WoTPhysicalAdapterConfigura
      * @return A PhysicalAssetProperty object representing the property.
      */
     private fun getPhysicalAssetProperty(name: String, propertyAffordance: PropertyAffordance<*>): PhysicalAssetProperty<*> {
-        return when (propertyAffordance) {
-            is NumberProperty -> PhysicalAssetProperty(name, propertyAffordance.default ?: 0.0)
-            is StringProperty -> PhysicalAssetProperty(name, propertyAffordance.default ?: "")
-            is BooleanProperty -> PhysicalAssetProperty(name, propertyAffordance.default ?: false)
-            is ObjectProperty -> PhysicalAssetProperty(name, propertyAffordance.default ?: emptyMap<String, Any>())
-            is ArrayProperty<*> -> PhysicalAssetProperty(name, propertyAffordance.default ?: emptyList<Any>())
+        val initialValue = propertyAffordance.const ?: propertyAffordance.default ?: when (propertyAffordance) {
+            is NumberProperty -> 0.0
+            is StringProperty -> ""
+            is BooleanProperty -> false
+            is ObjectProperty -> emptyMap<String, Any>()
+            is ArrayProperty<*> -> emptyList<Any>()
             else -> throw IllegalArgumentException("Unsupported Property Affordance type: ${propertyAffordance::class.simpleName}")
+        }
+        return PhysicalAssetProperty(
+            name,
+            initialValue,
+            propertyAffordance.const != null,
+            !propertyAffordance.readOnly
+        )
+    }
+
+    private fun getDeafultType(schema: DataSchema<out Any?>?): String {
+        return when (schema) {
+            is NumberSchema -> "number"
+            is StringSchema -> "string"
+            is BooleanSchema -> "boolean"
+            is ObjectSchema -> "object"
+            is ArraySchema<*> -> "array"
+            is NullSchema -> "null"
+            else -> {
+                logger.warn("Unsupported schema type: $schema")
+                "unknown"
+            }
         }
     }
 
@@ -305,8 +328,12 @@ class WoTPhysicalAdapter(id: String?, configuration: WoTPhysicalAdapterConfigura
      * @param value The value of the property.
      */
     private fun publishProperty(name : String, value : Any?) {
-        logger.info("Publishing property '$name' with value: $value")
-        this@WoTPhysicalAdapter.publishPhysicalAssetPropertyWldtEvent(PhysicalAssetPropertyWldtEvent(name, value))
+        try {
+            publishPhysicalAssetPropertyWldtEvent(PhysicalAssetPropertyWldtEvent(name, value))
+            logger.info("Property published ($name): $value")
+        } catch (e: Exception) {
+            logger.error("Error publishing property '$name': ${e.message}")
+        }
     }
 
     private suspend fun startClients() {

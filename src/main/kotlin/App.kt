@@ -56,7 +56,10 @@ fun sampleFunction() {
     val woTDigitalAdapter = WoTDigitalAdapter(
         "digital-adapter-$thingId",
         WoTDigitalAdapterConfiguration(
-            servient = digitalServient
+            servient = digitalServient,
+            thingTitle = "temperature sensor",
+            description = "A temperature sensor with humidity reading and reset/setTemperature actions",
+            allPropertiesObservable = true
         )
     )
 
@@ -72,11 +75,9 @@ fun sampleFunction() {
         try {
             logger.info("Starting DT...")
             engine.startAll()
-            delay(2000)
-
+            delay(500)
             physicalAdapter.simulateIncomingAction("reset", null)
-            delay(2000)
-
+            delay(1000)
             physicalAdapter.simulateIncomingAction("setTemperature", 25.0)
             delay(200000)
 

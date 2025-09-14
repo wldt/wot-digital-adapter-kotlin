@@ -7,10 +7,17 @@
             <pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
         </encoder>
     </appender>
-
-    <root level="INFO"> <!-- Your classes will log at INFO by default -->
-        <appender-ref ref="STDOUT" />
+    <!-- Default: logga solo WARN e sopra -->
+    <root level="WARN">
+        <appender-ref ref="STDOUT"/>
     </root>
+
+    <!-- Abilita INFO solo per la classe MyService -->
+    <logger name="WoTPhysicalAdapter" level="INFO"/>
+
+    <!-- Abilita DEBUG per tutto il package com.example.other -->
+    <logger name="WoTDigitalAdapter" level="info"/>
+
 
     <!-- Set higher logging levels for noisy libraries to suppress their INFO logs -->
     <logger name="org.eclipse.thingweb" level="WARN"/>

@@ -1,22 +1,18 @@
+// `src/main/kotlin/WoTDigitalAdapterConfiguration.kt`
 import org.eclipse.thingweb.Servient
 
-
 class WoTDigitalAdapterConfiguration(
-    private val servient: Servient,
-    private val thingTitle: String = "DT",
-    private val description: String? = null,
+    val servient: Servient,
+    val thingTitle: String = "DT",
+    val description: String? = null,
+    observableProperties: Set<String> = emptySet(),
+    val allPropertiesObservable: Boolean = false,
 ) {
+    val observableProperties: Set<String> = observableProperties.toSet()
 
-    fun getServient(): Servient {
-        return servient
-    }
-
-    fun getTDinfo(): Map<String, String> {
-        val map = mutableMapOf<String, String>()
-        map["title"] = thingTitle
-        if (description != null) {
-            map["description"] = description
+    val tdInfo: Map<String, String>
+        get() = buildMap {
+            put("title", thingTitle)
+            description?.let { put("description", it) }
         }
-        return map
-    }
 }
