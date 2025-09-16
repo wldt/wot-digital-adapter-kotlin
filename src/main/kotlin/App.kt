@@ -11,8 +11,6 @@ import kotlinx.coroutines.*
 import org.eclipse.thingweb.binding.http.HttpProtocolServer
 import org.eclipse.thingweb.binding.mqtt.MqttProtocolServer
 import org.slf4j.LoggerFactory
-import kotlin.String
-import kotlin.collections.List
 
 /**
  * Template for kotlin lib (WLDT + Kotlin-WoT).
@@ -75,10 +73,6 @@ fun sampleFunction() {
         try {
             logger.info("Starting DT...")
             engine.startAll()
-            delay(500)
-            physicalAdapter.simulateIncomingAction("reset", null)
-            delay(1000)
-            physicalAdapter.simulateIncomingAction("setTemperature", 25.0)
             delay(200000)
 
             engine.stopAll()

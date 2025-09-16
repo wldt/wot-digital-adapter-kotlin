@@ -56,9 +56,10 @@ class WoTPhysicalAdapter(id: String?, configuration: WoTPhysicalAdapterConfigura
                     events.add(PhysicalAssetEvent(name, eventAffordance.objectType?.defaultType))
                 }
                 td.actions.forEach { (name, actionAffordance) ->
+                    val type = actionAffordance.objectType?.defaultType ?: "default"
                     val input = actionAffordance.input
                     val inputType = input?.objectType?.defaultType ?: getDeafultType(input)
-                    actions.add(PhysicalAssetAction(name, actionAffordance.objectType?.defaultType, inputType) )
+                    actions.add(PhysicalAssetAction(name, type, inputType) )
                 }
             }
             this@WoTPhysicalAdapter.notifyPhysicalAdapterBound(pad)
@@ -69,10 +70,13 @@ class WoTPhysicalAdapter(id: String?, configuration: WoTPhysicalAdapterConfigura
                 startClients()
 
                 td.properties.forEach { (name, propertyAffordance) ->
-                    launch { publishProperty(name,readProperty(name)) }
-                    launch { startPropertyObservation(name, propertyAffordance) }
+                    if (propertyAffordance.const == null) {
+                        launch { publishProperty(name, readProperty(name)) }
+                        launch { startPropertyObservation(name, propertyAffordance) }
+                    } else {
+                        publishProperty(name, propertyAffordance.const)
+                    }
                 }
-
                 td.events.forEach { (name, _) ->
                     launch { subscribeToEvent(name) }
                 }

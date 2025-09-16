@@ -57,7 +57,7 @@ class WoTDigitalAdapter(id: String?, private val configuration: WoTDigitalAdapte
 
     private val propertiesValues = mutableMapOf<String, InteractionInput>()
     private val propertiesObserved = mutableSetOf<String>()
-    private val eventSubscribed = mutableSetOf<String>()
+    private val eventsSubscribed = mutableSetOf<String>()
 
     /**
      * Callback to notify the adapter on its correct startup
@@ -73,7 +73,7 @@ class WoTDigitalAdapter(id: String?, private val configuration: WoTDigitalAdapte
                 servient.start()
                 servient.expose(id)
             } catch (e: Exception) {
-                logger.error("Error starting or exposing the servient: ${e.message}", e)
+                logger.error("Error starting or exposing the servient: ${e.message}")
             }
         }
         logger.info("WoT Digital Adapter $id started")
@@ -92,27 +92,7 @@ class WoTDigitalAdapter(id: String?, private val configuration: WoTDigitalAdapte
      * DT Life Cycle notification that the DT is correctly on Sync
      * @param digitalTwinState
      */
-    override fun onDigitalTwinSync(digitalTwinState: DigitalTwinState?) {
-        try {
-            //Retrieve the list of available events and observe all variations
-            digitalTwinState!!.eventList
-                .map<MutableList<String?>>(Function { eventList: MutableList<DigitalTwinStateEvent?>? ->
-                    eventList!!.stream()
-                        .map<String?> { obj: DigitalTwinStateEvent? -> obj!!.key }
-                        .collect(Collectors.toList())
-                })
-                .ifPresent(Consumer { eventKeys: MutableList<String?>? ->
-                    try {
-                        observeDigitalTwinEventsNotifications(eventKeys)
-                    } catch (e: EventBusException) {
-                        e.printStackTrace()
-                    }
-                })
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-
-    }
+    override fun onDigitalTwinSync(digitalTwinState: DigitalTwinState?) {}
 
     /**
      * DT Life Cycle notification that the DT is currently Not Sync
@@ -171,6 +151,7 @@ class WoTDigitalAdapter(id: String?, private val configuration: WoTDigitalAdapte
                             if (propertiesObserved.contains(p.key)) {
                                 coroutineScope.launch {
                                     exposedThing.emitPropertyChange(p.key, interactionInput)
+                                    logger.info("Emitted property change for ${p.key} with value ${p.value}")
                                 }
                             }
                         }
@@ -201,15 +182,14 @@ class WoTDigitalAdapter(id: String?, private val configuration: WoTDigitalAdapte
      * @param digitalTwinStateEventNotification The generated Notification associated to a DT Event
      */
     override fun onEventNotificationReceived(digitalTwinStateEventNotification: DigitalTwinStateEventNotification<*>?) {
-        logger.info("RECEIVED event notification: $digitalTwinStateEventNotification")
         if (digitalTwinStateEventNotification != null) {
             val eventKey = digitalTwinStateEventNotification.digitalEventKey
             val eventValue = digitalTwinStateEventNotification.body
-            if (eventSubscribed.contains(eventKey)) {
+            if (eventsSubscribed.contains(eventKey)) {
                 coroutineScope.launch {
                     try {
-                        logger.info("Emitted event $eventKey with value $eventValue")
                         exposedThing.emitEvent(eventKey, getInteractionInput(eventValue))
+                        logger.info("Emitted event $eventKey with value $eventValue")
                     } catch (e: Exception) {
                         logger.error("Error emitting event $eventKey with value $eventValue: ${e.message}", e)
                     }
@@ -217,8 +197,6 @@ class WoTDigitalAdapter(id: String?, private val configuration: WoTDigitalAdapte
             }
         }
     }
-
-
 
     override fun onDigitalTwinBound(adaptersPhysicalAssetDescriptionMap: Map<String?, PhysicalAssetDescription?>?) {
         super.onDigitalTwinBound(adaptersPhysicalAssetDescriptionMap)
@@ -228,8 +206,8 @@ class WoTDigitalAdapter(id: String?, private val configuration: WoTDigitalAdapte
 
         adaptersPhysicalAssetDescriptionMap?.forEach { (_, pad) ->
             pad?.properties?.forEach { p -> properties.putIfAbsent(p.key, mapOf(
-                "type" to mapToType(p.type),
-                "observable" to (configuration.allPropertiesObservable || configuration.observableProperties.contains(p.key) && !p.isImmutable),
+                "type" to javaToWotType(p.type),
+                "observable" to (!p.isImmutable && configuration.isPropertyObservable(p.key)),
                 "const" to if (p.isImmutable) p.initialValue else null,
                 "readOnly" to !p.isWritable,
                 "default" to p.initialValue
@@ -244,7 +222,6 @@ class WoTDigitalAdapter(id: String?, private val configuration: WoTDigitalAdapte
                 "@type" to e.type,
             )) }
         }
-
         val constructionTD = createThingDescription(configuration.tdInfo, properties, actions, events)
         exposedThing = createExposedThing(constructionTD)
         td = exposedThing.getThingDescription()
@@ -291,14 +268,14 @@ class WoTDigitalAdapter(id: String?, private val configuration: WoTDigitalAdapte
         td.events.forEach { (eKey, eAff) ->
             exposedThing.setEventSubscribeHandler(eKey) { _ ->
                 logger.info("Event $eKey subscription invoked")
-                eventSubscribed.add(eKey)
+                eventsSubscribed.add(eKey)
                 observeDigitalTwinEventNotification(eKey)
             }
         }
         return exposedThing
     }
 
-    private fun mapToType(type: String): String {
+    private fun javaToWotType(type: String): String {
         val t = type.trim()
 
         if (t == "null") return "null"
@@ -350,9 +327,9 @@ class WoTDigitalAdapter(id: String?, private val configuration: WoTDigitalAdapte
         }
     }
 
-    private fun jsonNodeToValue(node: JsonNode?): Any? {
+    private fun jsonNodeToValue(node: JsonNode?): Any {
         return when {
-            node == null || node is NullNode -> null
+            node == null || node is NullNode -> "void"
             node.isTextual -> node.asText()
             node.isBoolean -> node.asBoolean()
             node.isInt -> node.asInt()
@@ -372,5 +349,3 @@ class WoTDigitalAdapter(id: String?, private val configuration: WoTDigitalAdapte
         }
     }
 }
-
-
