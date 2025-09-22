@@ -1,4 +1,5 @@
-// `src/main/kotlin/WoTDigitalAdapterConfiguration.kt`
+package wotDigitalAdapter
+
 import org.eclipse.thingweb.Servient
 
 class WoTDigitalAdapterConfiguration(

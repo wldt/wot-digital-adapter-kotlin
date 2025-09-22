@@ -3,8 +3,7 @@ import io.kotest.matchers.ints.shouldBeExactly
 
 class TestApp :
     StringSpec({
-        "Test the sample function" {
-            sampleFunction()
+        "Simple test" {
             42.shouldBeExactly(42)
         }
     })

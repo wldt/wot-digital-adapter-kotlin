@@ -1,42 +1,26 @@
-import com.fasterxml.jackson.databind.JsonNode
-import com.fasterxml.jackson.databind.node.NullNode
+package wotDigitalAdapter
+
 import it.wldt.adapter.digital.DigitalAdapter
-import it.wldt.adapter.physical.PhysicalAssetAction
 import it.wldt.adapter.physical.PhysicalAssetDescription
-import it.wldt.adapter.physical.PhysicalAssetEvent
-import it.wldt.adapter.physical.PhysicalAssetProperty
 import it.wldt.core.state.DigitalTwinState
-import it.wldt.core.state.DigitalTwinStateAction
 import it.wldt.core.state.DigitalTwinStateChange
-import it.wldt.core.state.DigitalTwinStateEvent
 import it.wldt.core.state.DigitalTwinStateEventNotification
 import it.wldt.core.state.DigitalTwinStateProperty
-import it.wldt.exception.EventBusException
+
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+
 import org.eclipse.thingweb.Wot
-import org.eclipse.thingweb.thing.schema.toInteractionInputValue
-import org.eclipse.thingweb.reflection.ExposedThingBuilder
-import org.eclipse.thingweb.reflection.annotations.Property
-import org.eclipse.thingweb.thing.ExposedThing
 import org.eclipse.thingweb.thing.ThingDescription
 import org.eclipse.thingweb.thing.schema.InteractionInput
-import org.eclipse.thingweb.thing.schema.NullSchema
-import org.eclipse.thingweb.thing.schema.PropertyAffordance
-import org.eclipse.thingweb.thing.schema.StringSchema
-import org.eclipse.thingweb.thing.schema.Type
 import org.eclipse.thingweb.thing.schema.WoTExposedThing
 import org.eclipse.thingweb.thing.schema.WoTThingDescription
-import org.eclipse.thingweb.thing.schema.toInteractionInputValue
+
 import org.slf4j.LoggerFactory
-import java.util.function.Consumer
-import java.util.function.Function
-import java.util.stream.Collectors
-import kotlin.jvm.optionals.toList
-import kotlin.sequences.toList
 
 /**
  * A Digital Adapter implementation based on the Eclipse ThingWeb (Kotlin WoT) library.
@@ -57,7 +41,6 @@ class WoTDigitalAdapter(id: String?, private val configuration: WoTDigitalAdapte
 
     private val propertiesValues = mutableMapOf<String, InteractionInput>()
     private val propertiesObserved = mutableSetOf<String>()
-    private val eventsSubscribed = mutableSetOf<String>()
 
     /**
      * Callback to notify the adapter on its correct startup
@@ -66,7 +49,7 @@ class WoTDigitalAdapter(id: String?, private val configuration: WoTDigitalAdapte
         coroutineScope.launch {
             while (!this@WoTDigitalAdapter::exposedThing.isInitialized) {
                 logger.info("Waiting for the DT to be bound to create the ExposedThing...")
-                kotlinx.coroutines.delay(200)
+                delay(200)
             }
             try {
                 servient.addThing(exposedThing)
@@ -92,34 +75,44 @@ class WoTDigitalAdapter(id: String?, private val configuration: WoTDigitalAdapte
      * DT Life Cycle notification that the DT is correctly on Sync
      * @param digitalTwinState
      */
-    override fun onDigitalTwinSync(digitalTwinState: DigitalTwinState?) {}
+    override fun onDigitalTwinSync(digitalTwinState: DigitalTwinState?) {
+        logger.info("Digital Twin Sync")
+    }
 
     /**
      * DT Life Cycle notification that the DT is currently Not Sync
      * @param digitalTwinState
      */
-    override fun onDigitalTwinUnSync(digitalTwinState: DigitalTwinState?) {}
+    override fun onDigitalTwinUnSync(digitalTwinState: DigitalTwinState?) {
+        logger.info("Digital Twin Unsync")
+    }
 
     /**
      * DT Life Cycle notification that the DT has been created
      */
-    override fun onDigitalTwinCreate() {}
+    override fun onDigitalTwinCreate() {
+        logger.info("Digital Twin Create")
+    }
 
     /**
      * DT Life Cycle Notification that the DT has correctly Started
      */
-    override fun onDigitalTwinStart() {}
+    override fun onDigitalTwinStart() {
+        logger.info("Digital Twin Start")
+    }
 
     /**
      * DT Life Cycle Notification that the DT has been stopped
      */
-    override fun onDigitalTwinStop() {}
+    override fun onDigitalTwinStop() {
+        logger.info("Digital Twin Stop")
+    }
 
     /**
      * DT Life Cycle Notification that the DT has destroyed
      */
     override fun onDigitalTwinDestroy() {
-
+        logger.info("Digital Twin Destroyed")
     }
 
     /**
@@ -143,8 +136,11 @@ class WoTDigitalAdapter(id: String?, private val configuration: WoTDigitalAdapte
                 val resource = stateChange.resource
 
                 when (operation) {
-                    DigitalTwinStateChange.Operation.OPERATION_UPDATE ->
-                        if (resourceType == DigitalTwinStateChange.ResourceType.PROPERTY) {
+                    DigitalTwinStateChange.Operation.OPERATION_UPDATE,
+                    DigitalTwinStateChange.Operation.OPERATION_UPDATE_VALUE ->
+                        if (resourceType == DigitalTwinStateChange.ResourceType.PROPERTY ||
+                            resourceType == DigitalTwinStateChange.ResourceType.PROPERTY_VALUE)
+                        {
                             val p = resource as DigitalTwinStateProperty<*>
                             val interactionInput = getInteractionInput(p.value)
                             propertiesValues[p.key] = interactionInput
@@ -155,9 +151,6 @@ class WoTDigitalAdapter(id: String?, private val configuration: WoTDigitalAdapte
                                 }
                             }
                         }
-
-                    DigitalTwinStateChange.Operation.OPERATION_UPDATE_VALUE ->
-                        logger.info("Update value operation on $resourceType: $resource")
 
                     DigitalTwinStateChange.Operation.OPERATION_ADD ->
                         logger.info("Add operation on $resourceType: $resource")
@@ -170,7 +163,6 @@ class WoTDigitalAdapter(id: String?, private val configuration: WoTDigitalAdapte
                 }
             }
         } else {
-            // No state changes
             logger.info("No state changes detected.")
         }
     }
@@ -185,20 +177,19 @@ class WoTDigitalAdapter(id: String?, private val configuration: WoTDigitalAdapte
         if (digitalTwinStateEventNotification != null) {
             val eventKey = digitalTwinStateEventNotification.digitalEventKey
             val eventValue = digitalTwinStateEventNotification.body
-            if (eventsSubscribed.contains(eventKey)) {
-                coroutineScope.launch {
-                    try {
-                        exposedThing.emitEvent(eventKey, getInteractionInput(eventValue))
-                        logger.info("Emitted event $eventKey with value $eventValue")
-                    } catch (e: Exception) {
-                        logger.error("Error emitting event $eventKey with value $eventValue: ${e.message}", e)
-                    }
+            coroutineScope.launch {
+                try {
+                    exposedThing.emitEvent(eventKey, getInteractionInput(eventValue))
+                    logger.info("Emitted event $eventKey with value $eventValue")
+                } catch (e: Exception) {
+                    logger.error("Error emitting event $eventKey with value $eventValue: ${e.message}", e)
                 }
             }
         }
     }
 
     override fun onDigitalTwinBound(adaptersPhysicalAssetDescriptionMap: Map<String?, PhysicalAssetDescription?>?) {
+        logger.info("Digital Twin Bound")
         super.onDigitalTwinBound(adaptersPhysicalAssetDescriptionMap)
         val properties = HashMap<String, Any?>()
         val actions = HashMap<String, Any?>()
@@ -254,7 +245,12 @@ class WoTDigitalAdapter(id: String?, private val configuration: WoTDigitalAdapte
                 exposedThing.setPropertyObserveHandler(pKey) { _ ->
                     logger.info("Property $pKey observe invoked")
                     propertiesObserved.add(pKey)
-                    propertiesValues[pKey]
+                    null
+                }
+                exposedThing.setPropertyUnobserveHandler(pKey) { _ ->
+                    logger.info("Property $pKey unobserve invoked")
+                    propertiesObserved.remove(pKey)
+                    null
                 }
             }
         }
@@ -265,87 +261,16 @@ class WoTDigitalAdapter(id: String?, private val configuration: WoTDigitalAdapte
                 getInteractionInput(input.value())
             }
         }
-        td.events.forEach { (eKey, eAff) ->
+        td.events.keys.forEach { eKey ->
             exposedThing.setEventSubscribeHandler(eKey) { _ ->
                 logger.info("Event $eKey subscription invoked")
-                eventsSubscribed.add(eKey)
                 observeDigitalTwinEventNotification(eKey)
+            }
+            exposedThing.setEventUnsubscribeHandler(eKey) { _ ->
+                logger.info("Event $eKey unsubscription invoked")
+                unObserveDigitalTwinEventNotification(eKey)
             }
         }
         return exposedThing
-    }
-
-    private fun javaToWotType(type: String): String {
-        val t = type.trim()
-
-        if (t == "null") return "null"
-        if (t.endsWith("[]") || t.startsWith("[")) return "array"
-        val groups = mapOf(
-            "string" to setOf("java.lang.String", "kotlin.String", "String"),
-            "boolean" to setOf("java.lang.Boolean", "boolean", "kotlin.Boolean", "Boolean"),
-            "integer" to setOf(
-                "java.lang.Integer", "int", "kotlin.Int", "Integer",
-                "java.lang.Long", "long", "kotlin.Long", "Long",
-                "java.lang.Short", "short", "kotlin.Short", "Short",
-                "java.math.BigInteger"
-            ),
-            "number" to setOf(
-                "java.lang.Float", "float", "kotlin.Float", "Float",
-                "java.lang.Double", "double", "kotlin.Double", "Double",
-                "java.math.BigDecimal", "java.lang.Number", "kotlin.Number", "Number"
-            ),
-            "array" to setOf(
-                "java.util.List", "java.util.Set", "java.util.Collection",
-                "kotlin.collections.List", "kotlin.collections.Set", "kotlin.collections.Collection"
-            ),
-            "object" to setOf(
-                "java.util.Map", "kotlin.collections.Map",
-                "java.lang.Object", "kotlin.Any"
-            )
-        )
-
-        for ((jsonType, aliases) in groups) {
-            if (t in aliases) return jsonType
-        }
-        return "object"
-    }
-
-    private fun getInteractionInput(body: Any?): InteractionInput.Value {
-        if (body is JsonNode) {
-            return InteractionInput.Value(body)
-        }
-        return when (body) {
-            null -> throw IllegalArgumentException("Null value cannot be converted to InteractionInput")
-            is Number -> body.toInteractionInputValue()
-            is String -> body.toInteractionInputValue()
-            is Boolean -> body.toInteractionInputValue()
-            is MutableMap<*, *> -> body.toInteractionInputValue()
-            is MutableList<*> -> body.toInteractionInputValue()
-            else -> throw IllegalArgumentException(
-                "Unsupported type: ${body::class.qualifiedName}. Only JsonNode, Number, String, Boolean, Map, List are supported."
-            )
-        }
-    }
-
-    private fun jsonNodeToValue(node: JsonNode?): Any {
-        return when {
-            node == null || node is NullNode -> "void"
-            node.isTextual -> node.asText()
-            node.isBoolean -> node.asBoolean()
-            node.isInt -> node.asInt()
-            node.isLong -> node.asLong()
-            node.isFloat || node.isDouble -> node.asDouble()
-            node.isArray -> {
-                val list = mutableListOf<Any?>()
-                node.forEach { list.add(jsonNodeToValue(it)) }
-                list
-            }
-            node.isObject -> {
-                val map = mutableMapOf<String, Any?>()
-                node.fields().forEach { (key, value) -> map[key] = jsonNodeToValue(value) }
-                map
-            }
-            else -> throw IllegalArgumentException("Unsupported JsonNode type: ${node.nodeType}")
-        }
     }
 }

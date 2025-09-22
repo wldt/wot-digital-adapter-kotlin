@@ -4,7 +4,7 @@ plugins {
 }
 
 // Modify HERE the name of the project
-rootProject.name = "kotlin-template-project"
+rootProject.name = "wot-digital-adapter"
 
 develocity {
     buildScan {
