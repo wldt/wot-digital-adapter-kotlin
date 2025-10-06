@@ -7,11 +7,11 @@ This is a Kotlin implementation of a digital adapter that allows interaction to 
 ```kotlin
     // Example of a Servient with HTTP and MQTT binding from library kotlin-wot
 
-    val mqttConfig = MqttClientConfig("localhost", 61890, "exposer-${System.currentTimeMillis()}")
+    val mqttConfig = MqttClientConfig("localhost", 61890, "exposer-0")
 
     val exposingServient = Servient(
         servers = listOf(
-            HttpProtocolServer(),      // deafoult: "http://localhost:8080"
+            HttpProtocolServer(),      // default: "http://localhost:8080"
             MqttProtocolServer(mqttConfig)
         ),
         clientFactories = listOf(
@@ -22,10 +22,11 @@ This is a Kotlin implementation of a digital adapter that allows interaction to 
 
     val config = WoTDigitalAdapterConfiguration(
         servient = exposingServient,
-        thingID = "temperature-sensor-0",
+        thingId = "temperature-sensor-0",
         thingTitle = "temperature sensor",
         description = "A temperature sensor with humidity reading and reset/setTemperature actions",
-        observableProperties = setOf("temperature-property-key")
+        observableProperties = setOf("temperature-property-key"),
+        //allPropertiesObservable = true,
     )
 
     val woTDigitalAdapter = WoTDigitalAdapter("digital-adapter-0", config)
@@ -52,51 +53,73 @@ DigitalTwinStateProperty(
 To Thing Description
 ```json
 {
-    "properties": {
-        "temperature-property-key": {
-          "type": "object",
-          "forms": [
-            {
-              "href": "mqtt://localhost:61890/temperature-sensor-0/properties/temperature-property-key",
-              "contentType": "application/json",
-              "op": [
-                "readproperty",
-                "writeproperty"
-              ]
-            },
-            {
-              "href": "http://localhost:8080/temperature-sensor-0/properties/temperature-property-key",
-              "contentType": "application/json",
-              "op": [
-                "readproperty",
-                "writeproperty"
-              ],
-              "optionalProperties": {
-                "htv:methodName": ""
-              }
-            }
+  "properties": {
+    "temperature-property-key": {
+      "type": "object",
+      "forms": [
+        {
+          "href": "mqtt://localhost:61890/temperature-sensor-0/properties/temperature-property-key",
+          "contentType": "application/json",
+          "op": [
+            "readproperty",
+            "writeproperty"
+          ]
+        },
+        {
+          "href": "mqtt://localhost:61890/temperature-sensor-0/properties/temperature-property-key/observable",
+          "contentType": "application/json",
+          "op": [
+            "observeproperty",
+            "unobserveproperty"
+          ]
+        },
+        {
+          "href": "http://localhost:8080/temperature-sensor-0/properties/temperature-property-key",
+          "contentType": "application/json",
+          "op": [
+            "readproperty",
+            "writeproperty"
           ],
-          "properties": {
-            "temperature": {
-              "type": "number"
-            },
-            "hour": {
-              "type": "integer"
-            },
-            "alarms": {
-              "type": "array",
-              "items": {
-                "type": "boolean"
-              }
-            }
-          },
-          "default": {
-            "temperature": 0,
-            "hour": 0,
-            "alarms": [false, false, false]
+          "optionalProperties": {
+            "htv:methodName": ""
+          }
+        },
+        {
+          "href": "http://localhost:8080/temperature-sensor-0/properties/temperature-property-key/observable",
+          "contentType": "application/json",
+          "subprotocol": "longpoll",
+          "op": [
+            "observeproperty",
+            "unobserveproperty"
+          ]
+        }
+      ],
+      "observable": true,
+      "properties": {
+        "temperature": {
+          "type": "number"
+        },
+        "hour": {
+          "type": "integer"
+        },
+        "alarms": {
+          "type": "array",
+          "items": {
+            "type": "boolean"
           }
         }
+      },
+      "default": {
+        "temperature": 0.0,
+        "hour": 0,
+        "alarms": [
+          false,
+          false,
+          false
+        ]
+      }
     }
+  }
 }
 ```
 ### Actions mapping
@@ -142,7 +165,7 @@ NOTE: Serialization of collection or object type input is not supported, Use str
 ### Events mapping
 From
 ```kotlin
-PhysicalAssetEvent(
+DigitalTwinStateEvent(
     key='overheating-event-key',
     type='text/plain'
 )
