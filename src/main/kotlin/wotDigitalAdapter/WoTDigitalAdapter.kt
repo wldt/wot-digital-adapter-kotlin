@@ -7,6 +7,8 @@ import it.wldt.core.state.DigitalTwinStateChange
 import it.wldt.core.state.DigitalTwinStateEvent
 import it.wldt.core.state.DigitalTwinStateEventNotification
 import it.wldt.core.state.DigitalTwinStateProperty
+import it.wldt.core.state.DigitalTwinStateRelationship
+import it.wldt.core.state.DigitalTwinStateRelationshipInstance
 
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -24,7 +26,6 @@ import org.eclipse.thingweb.thing.schema.WoTThingDescription
 import org.slf4j.LoggerFactory
 import kotlin.collections.component1
 import kotlin.collections.component2
-import kotlin.reflect.full.memberProperties
 
 /**
  * A Digital Adapter implementation based on the Eclipse ThingWeb (Kotlin WoT) library.
@@ -46,6 +47,7 @@ class WoTDigitalAdapter(id: String?, private val configuration: WoTDigitalAdapte
     private val eventsMap = HashMap<String, Any?>()
     private val propertiesValues = mutableMapOf<String, InteractionInput>()
     private val propertiesObserved = mutableSetOf<String>()
+    private val relationships = mutableMapOf<String, DigitalTwinStateRelationship<*>>()
     private var synchronized = false
 
     private val coroutineScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -106,7 +108,7 @@ class WoTDigitalAdapter(id: String?, private val configuration: WoTDigitalAdapte
             exposedThing = createExposedThing(ThingDescription.fromMap(tdConstructionMap))
             td = exposedThing.getThingDescription()
         } catch (e: Exception) {
-            logger.error("Error creating Thing Description or Exposed Thing: ${e.message}",e)
+            logger.error("Error creating Thing Description or Exposed Thing: ${e.message}", e)
         }
         synchronized = true
     }
@@ -170,91 +172,110 @@ class WoTDigitalAdapter(id: String?, private val configuration: WoTDigitalAdapte
                 val resource = stateChange.resource
                 var tdChanged = true
 
-                try { when (resourceType) {
-                    DigitalTwinStateChange.ResourceType.PROPERTY_VALUE -> {
-                        tdChanged = false
-                        if (operation == DigitalTwinStateChange.Operation.OPERATION_UPDATE_VALUE) {
-                            val p = resource as DigitalTwinStateProperty<*>
-                            val interactionInput = getInteractionInput(p.value)
-                            propertiesValues[p.key] = interactionInput
-                            if (propertiesObserved.contains(p.key)) {
-                                coroutineScope.launch {
-                                    exposedThing.emitPropertyChange(p.key, interactionInput)
-                                    logger.info("Emitted property change for ${p.key} with value ${p.value}")
+                try {
+                    when (resourceType) {
+                        DigitalTwinStateChange.ResourceType.PROPERTY_VALUE -> {
+                            tdChanged = false
+                            if (operation == DigitalTwinStateChange.Operation.OPERATION_UPDATE_VALUE) {
+                                val p = resource as DigitalTwinStateProperty<*>
+                                val interactionInput = getInteractionInput(p.value)
+                                propertiesValues[p.key] = interactionInput
+                                if (propertiesObserved.contains(p.key)) {
+                                    coroutineScope.launch {
+                                        exposedThing.emitPropertyChange(p.key, interactionInput)
+                                        logger.info("Emitted property change for ${p.key} with value ${p.value}")
+                                    }
                                 }
+                            } else {
+                                logger.warn("Unsupported operation $operation for resource type $resourceType")
                             }
-                        } else {
-                            logger.warn("Unsupported operation $operation for resource type $resourceType")
                         }
-                    }
 
-                    DigitalTwinStateChange.ResourceType.PROPERTY -> {
-                        val p = resource as DigitalTwinStateProperty<*>
-                        when (operation) {
-                            DigitalTwinStateChange.Operation.OPERATION_ADD,
-                            DigitalTwinStateChange.Operation.OPERATION_UPDATE -> {
-                                propertiesMap[p.key] = getPropertyMap(p)
-                                propertiesValues[p.key] = getInteractionInput(p.value)
+                        DigitalTwinStateChange.ResourceType.PROPERTY -> {
+                            val p = resource as DigitalTwinStateProperty<*>
+                            when (operation) {
+                                DigitalTwinStateChange.Operation.OPERATION_ADD,
+                                DigitalTwinStateChange.Operation.OPERATION_UPDATE -> {
+                                    propertiesMap[p.key] = getPropertyMap(p, configuration.isPropertyObservable(p.key))
+                                    propertiesValues[p.key] = getInteractionInput(p.value)
+                                }
+
+                                DigitalTwinStateChange.Operation.OPERATION_REMOVE -> {
+                                    propertiesMap.remove(p.key)
+                                    propertiesValues.remove(p.key)
+                                    propertiesObserved.remove(p.key)
+                                }
+
+                                else -> tdChanged = false
                             }
-                            DigitalTwinStateChange.Operation.OPERATION_REMOVE -> {
-                                propertiesMap.remove(p.key)
-                                propertiesValues.remove(p.key)
-                                propertiesObserved.remove(p.key)
+                        }
+
+                        DigitalTwinStateChange.ResourceType.ACTION -> {
+                            val a = resource as DigitalTwinStateAction
+                            when (operation) {
+                                DigitalTwinStateChange.Operation.OPERATION_ADD,
+                                DigitalTwinStateChange.Operation.OPERATION_UPDATE ->
+                                    actionsMap[a.key] = getActionMap(a)
+
+                                DigitalTwinStateChange.Operation.OPERATION_REMOVE ->
+                                    actionsMap.remove(a.key)
+
+                                else -> tdChanged = false
                             }
-                            else -> tdChanged = false
+                        }
+
+                        DigitalTwinStateChange.ResourceType.EVENT -> {
+                            val e = resource as DigitalTwinStateEvent
+                            when (operation) {
+                                DigitalTwinStateChange.Operation.OPERATION_ADD,
+                                DigitalTwinStateChange.Operation.OPERATION_UPDATE ->
+                                    eventsMap[e.key] = getEventMap(e)
+
+                                DigitalTwinStateChange.Operation.OPERATION_REMOVE ->
+                                    eventsMap.remove(e.key)
+
+                                else -> tdChanged = false
+                            }
+                        }
+
+                        DigitalTwinStateChange.ResourceType.RELATIONSHIP -> {
+                            val r = resource as DigitalTwinStateRelationship<*>
+                            when (operation) {
+                                DigitalTwinStateChange.Operation.OPERATION_ADD,
+                                DigitalTwinStateChange.Operation.OPERATION_UPDATE -> {
+                                    propertiesMap[r.name] = getRelationshipMap()
+                                    relationships[r.name] = r
+                                    propertiesValues[r.name] = getInteractionInput(r)
+                                }
+
+                                DigitalTwinStateChange.Operation.OPERATION_REMOVE -> {
+                                    propertiesMap.remove(r.name)
+                                    relationships.remove(r.name)
+                                    propertiesValues.remove(r.name)
+                                }
+
+                                else -> tdChanged = false
+                            }
+                        }
+
+                        DigitalTwinStateChange.ResourceType.RELATIONSHIP_INSTANCE -> {
+                            val i = resource as DigitalTwinStateRelationshipInstance<*>
+                            when (operation) {
+                                DigitalTwinStateChange.Operation.OPERATION_ADD,
+                                DigitalTwinStateChange.Operation.OPERATION_UPDATE, -> {
+                                    relationships[i.relationshipName]?.addInstance(i)
+                                }
+
+                                DigitalTwinStateChange.Operation.OPERATION_REMOVE -> {
+                                    relationships[i.relationshipName]?.removeInstance(i.key)
+                                }
+                                else -> {}
+                            }
+                            propertiesValues[i.relationshipName] = getInteractionInput(relationships[i.relationshipName]!!)
+                            tdChanged = false
                         }
                     }
-
-                    DigitalTwinStateChange.ResourceType.ACTION -> {
-                        val a = resource as DigitalTwinStateAction
-                        when (operation) {
-                            DigitalTwinStateChange.Operation.OPERATION_ADD,
-                            DigitalTwinStateChange.Operation.OPERATION_UPDATE ->
-                                actionsMap[a.key] = getActionMap(a)
-
-                            DigitalTwinStateChange.Operation.OPERATION_REMOVE ->
-                                actionsMap.remove(a.key)
-
-                            else -> tdChanged = false
-                        }
-                    }
-
-                    DigitalTwinStateChange.ResourceType.EVENT -> {
-                        val e = resource as DigitalTwinStateEvent
-                        when (operation) {
-                            DigitalTwinStateChange.Operation.OPERATION_ADD,
-                            DigitalTwinStateChange.Operation.OPERATION_UPDATE ->
-                                eventsMap[e.key] = getEventMap(e)
-
-                            DigitalTwinStateChange.Operation.OPERATION_REMOVE ->
-                                eventsMap.remove(e.key)
-
-                            else -> tdChanged = false
-                        }
-                    }
-                    /*DigitalTwinStateChange.ResourceType.RELATIONSHIP,
-                    DigitalTwinStateChange.ResourceType.RELATIONSHIP_INSTANCE -> {
-                        val r = if (resource is DigitalTwinStateRelationship<*>) {
-                            resource.instances
-                        } else {
-                            listOf(resource as DigitalTwinStateRelationshipInstance<*>)
-                        }
-                        when (operation) {
-                            DigitalTwinStateChange.Operation.OPERATION_ADD,
-                            DigitalTwinStateChange.Operation.OPERATION_UPDATE ->
-                                r.forEach { linksMap[it.key] = getRelationshipIstanceMap(it) }
-
-                            DigitalTwinStateChange.Operation.OPERATION_REMOVE ->
-                                r.forEach { linksMap.remove(it.key) }
-
-                            else -> tdChanged = false
-                        }
-                    }*/
-                    else -> {
-                        tdChanged = false
-                        logger.warn("Unsupported resource type $resourceType")
-                    }
-                } } catch (e: Exception) {
+                } catch (e: Exception) {
                     tdChanged = false
                     logger.error("Error processing state change $stateChange: ${e.message}")
                 }
@@ -321,12 +342,25 @@ class WoTDigitalAdapter(id: String?, private val configuration: WoTDigitalAdapte
      */
     private fun getTdConstructionMap(base: Map<String, String>, dtState: DigitalTwinState?): Map<String, Any?> {
         val map = HashMap<String, Any?>()
-        dtState?.propertyList?.ifPresent { list -> list.forEach { p ->
-            propertiesMap[p.key] = getPropertyMap(p)
-            propertiesValues[p.key] = getInteractionInput(p.value)
-        } }
+        dtState?.propertyList?.ifPresent { list ->
+            list.forEach { p ->
+                try {
+                    propertiesMap[p.key] = getPropertyMap(p, configuration.isPropertyObservable(p.key))
+                    propertiesValues[p.key] = getInteractionInput(p.value)
+                } catch (e: Exception) {
+                    logger.error("Error processing property ${p.key}: ${e.message}")
+                }
+            }
+        }
         dtState?.actionList?.ifPresent { list -> list.forEach { a -> actionsMap[a.key] = getActionMap(a) } }
         dtState?.eventList?.ifPresent { list -> list.forEach { e -> eventsMap[e.key] = getEventMap(e) } }
+        dtState?.relationshipList?.ifPresent { list ->
+            list.forEach { r ->
+                propertiesMap[r.name] = getRelationshipMap()
+                propertiesValues[r.name] = getInteractionInput(r)
+                relationships[r.name] = r
+            }
+        }
 
         map.putAll(base)
         map["id"] = thingId
@@ -344,7 +378,10 @@ class WoTDigitalAdapter(id: String?, private val configuration: WoTDigitalAdapte
     private fun createExposedThing(td: WoTThingDescription): WoTExposedThing {
         val exposedThing = wot.produce(td)
         td.properties.forEach { (pKey, pAff) ->
-            exposedThing.setPropertyReadHandler(pKey) { _ -> propertiesValues[pKey] }
+            exposedThing.setPropertyReadHandler(pKey) {_ ->
+                logger.info("Property $pKey read invoked")
+                propertiesValues[pKey]
+            }
             if (pAff.observable) {
                 exposedThing.setPropertyObserveHandler(pKey) { _ ->
                     logger.info("Property $pKey observe invoked")
@@ -376,69 +413,5 @@ class WoTDigitalAdapter(id: String?, private val configuration: WoTDigitalAdapte
             }
         }
         return exposedThing
-    }
-
-    /**
-     * Builds a map representing the metadata of a Digital Twin State Property for inclusion in a Thing Description.
-     */
-    private fun getPropertyMap(p: DigitalTwinStateProperty<*>): Map<String, Any?> {
-        val map = mutableMapOf<String, Any?>(
-            "observable" to (configuration.isPropertyObservable(p.key)),
-            "readOnly" to (!p.isWritable && p.isReadable),
-            "writeOnly" to (!p.isReadable && p.isWritable),
-            "default" to p.value,
-        )
-        map.putAll(getTypePropertiesMap(p.type, p.value))
-
-        return map
-    }
-
-    /**
-     * Recursively builds a map representing the type and structure of a property or complex type.
-     * This is used to define the schema of properties in the Thing Description.
-     */
-    private fun getTypePropertiesMap(type: String?, istance: Any?): Map<String, Any?> {
-        if (type == null) return mapOf("type" to "string")
-        val wotType = javaToWotType(type)
-        val map = mutableMapOf<String, Any?>()
-        map["type"] = wotType
-        if (istance == null) return map
-        try {
-            when (wotType) {
-                "object" -> {
-                    map["properties"] = istance::class.memberProperties.associate { prop ->
-                        val value = prop.getter.call(istance)
-                        prop.name to getTypePropertiesMap(value?.javaClass.toString(), value)
-                    }
-                }
-
-                "array" -> {
-                    val item = (istance as Collection<*>).firstOrNull()
-                    map["items"] = getTypePropertiesMap(item?.javaClass.toString(), item)
-                }
-            }
-        } catch (e: Exception) {
-            logger.error("Error getting type properties map for type: $type, instance: $istance: ${e.message}")
-        }
-        return map
-    }
-
-    /**
-     * Builds a map representing the metadata of a Digital Twin State Action for inclusion in a Thing Description.
-     */
-    private fun getActionMap(a: DigitalTwinStateAction): Map<String, Any?> {
-        return mapOf(
-            "@type" to a.type,
-            "input" to getTypePropertiesMap(a.contentType, null)
-        )
-    }
-
-    /**
-     * Builds a map representing the metadata of a Digital Twin State Event for inclusion in a Thing Description.
-     */
-    private fun getEventMap(e: DigitalTwinStateEvent): Map<String, Any?> {
-        return mapOf(
-            "@type" to e.type,
-        )
     }
 }

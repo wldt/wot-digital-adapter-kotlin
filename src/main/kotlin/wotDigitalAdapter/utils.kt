@@ -2,6 +2,7 @@ package wotDigitalAdapter
 
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.node.NullNode
+import it.wldt.core.state.DigitalTwinStateRelationship
 import org.eclipse.thingweb.thing.schema.InteractionInput
 import org.eclipse.thingweb.thing.schema.toInteractionInputValue
 import kotlin.collections.component1
@@ -9,16 +10,26 @@ import kotlin.collections.component2
 import kotlin.collections.forEach
 import kotlin.reflect.full.memberProperties
 
+/**
+ * Maps a Java/Kotlin Class to its corresponding WoT type.
+ *
+ * @param clazz The Java/Kotlin Class to be mapped.
+ * @return The corresponding WoT type as a string.
+ */
+internal fun javaClassToWotType(clazz: Class<*>): String {
+    if (clazz.isArray) return "array"
+    return stringToWotType(clazz.simpleName)
+}
 
 
 /**
- * Maps Java/Kotlin types to WoT types.
+ * Maps Java/Kotlin types name to WoT types.
  * If the type is not recognized, it defaults to "object".
  *
  * @param type The Java/Kotlin type as a string.
  * @return The corresponding WoT type as a string.
  */
-internal fun javaToWotType(type: String): String {
+internal fun stringToWotType(type: String): String {
     val t = type.trim()
         .removePrefix("class ")
         .substringBefore("$")
@@ -29,10 +40,6 @@ internal fun javaToWotType(type: String): String {
 
     if (raw == "null" || raw.equals("void", true)) return "null"
 
-    // Array style or reflective / Kotlin array types
-    if (raw.endsWith("[]") || raw.startsWith("[") ||
-        raw == "kotlin.Array" || raw == "java.lang.reflect.Array"
-    ) return "array"
 
     val groups = mapOf(
         "string" to setOf(
@@ -66,13 +73,11 @@ internal fun javaToWotType(type: String): String {
             "java.util.Optional", "java.util.OptionalInt", "java.util.OptionalLong", "java.util.OptionalDouble"
         )
     )
-
     for ((jsonType, aliases) in groups) {
         if (raw in aliases) return jsonType
     }
 
     if (raw.contains("List") || raw.contains("Set") || raw.contains("Collection")) return "array"
-    if (raw.contains("Map")) return "object"
 
     return "object"
 }
@@ -87,15 +92,23 @@ internal fun javaToWotType(type: String): String {
  */
 internal fun getInteractionInput(body: Any?): InteractionInput.Value {
     return when (body) {
+        null -> throw IllegalArgumentException("Null value cannot be converted to InteractionInput")
         is JsonNode -> InteractionInput.Value(body)
+        is DigitalTwinStateRelationship<*> -> getRelationshipInteractionInput(body)
         is Int -> body.toInteractionInputValue()
         is Number -> body.toInteractionInputValue()
         is String -> body.toInteractionInputValue()
         is Boolean -> body.toInteractionInputValue()
-        is MutableMap<*, *> -> body.toInteractionInputValue()
-        is MutableList<*> -> body.toInteractionInputValue()
-        null -> throw IllegalArgumentException("Null value cannot be converted to InteractionInput")
-        else -> (body::class.memberProperties.associate { p -> p.name to p.getter.call(body) }).toMutableMap().toInteractionInputValue()
+        is Map<*, *> -> body.toMutableMap().toInteractionInputValue()
+        is Iterable<*> -> body.toMutableList().toInteractionInputValue()
+        is Array<*> -> body.toMutableList().toInteractionInputValue()
+        else -> (body::class.memberProperties.associate { p ->
+            p.name to try {
+                p.getter.call(body)
+            } catch (_: Exception) {
+                null
+            }
+        }).toMutableMap().toInteractionInputValue()
     }
 }
 
@@ -126,4 +139,19 @@ internal fun jsonNodeToValue(node: JsonNode?): Any {
         }
         else -> throw IllegalArgumentException("Unsupported JsonNode type: ${node.nodeType}")
     }
+}
+
+private fun getRelationshipInteractionInput(rel: DigitalTwinStateRelationship<*>): InteractionInput.Value {
+    val map = mutableMapOf<String, Any?>(
+        "name" to rel.name,
+        "type" to rel.type,
+        "instanceId" to rel.instances.map {
+            i -> mutableMapOf<String, Any?>(
+                "relationshipName" to i.relationshipName,
+                "targetId" to i.targetId,
+                "key" to i.key,
+                "metadata" to i.metadata.toMutableMap()
+            ) }.toMutableList()
+    )
+    return map.toInteractionInputValue()
 }

@@ -6,17 +6,14 @@ This is a Kotlin implementation of a digital adapter that allows interaction to 
 
 ```kotlin
     // Example of a Servient with HTTP and MQTT binding from library kotlin-wot
-
-    val mqttConfig = MqttClientConfig("localhost", 61890, "exposer-0")
-
+    val mqttExposerConfig = MqttClientConfig("localhost", 61890, "exposer-0")
+    val port = 8080
+    val baseUrl = "http://localhost:${port}"
+    
     val exposingServient = Servient(
         servers = listOf(
-            HttpProtocolServer(),      // default: "http://localhost:8080"
-            MqttProtocolServer(mqttConfig)
-        ),
-        clientFactories = listOf(
-            HttpProtocolClientFactory(),
-            MqttProtocolClientFactory(mqttConfig)
+            HttpProtocolServer(bindPort = port, baseUrls = listOf(baseUrl)),
+            MqttProtocolServer(mqttExposerConfig)
         )
     )
 
@@ -34,7 +31,7 @@ This is a Kotlin implementation of a digital adapter that allows interaction to 
 ### how to reach the WoT Thing exposed by the adapter
 ```kotlin
     val thingId = woTDigitalAdapter.thingId
-    val thingDescription = woTDigitalAdapter.getThingDescription().toString() // adapter need to be fully started
+    val thingDescription = woTDigitalAdapter.getThingDescription().toJson() // adapter need to be fully started
     val thingUrl = "${baseUrl}/${thingId}"
 ```
 ## Thing description generation
@@ -203,4 +200,58 @@ To Thing Description
 }
 ```
 ### Relationships
-Relationships are not supported yet, they won't have a representation in the Thing Description produced by the adapter
+Web of Things Thing Description does not have a direct mapping for Digital Twin Relationships.
+So they are represented as read-only properties with complex object types.
+With this solution the name of the relation is the only information available in the TD, the remaining fields must be accessed by reading the property.
+```kotlin
+DigitalTwinStateRelationship(
+    name='insideIn',
+    type='insideIn',
+    instances={ physical.asset.relationship.insideIn.building-hq=DigitalTwinStateRelationshipInstance(
+        relationshipName='insideIn',
+        targetId='building-hq',
+        instanceKey='physical.asset.relationship.insideIn.building-hq',
+        metadata={}
+    )}
+)
+```
+To Thing Description
+```json
+{
+  "properties": {
+    "insideIn": {
+      "type": "object",
+      "forms": [[ {}, {} ]],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        },
+        "instances": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "targetId": {
+                "type": "string"
+              },
+              "targetType": {
+                "type": "string"
+              },
+              "attributes": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      },
+      "readOnly": true
+    }
+  }
+}
+```
